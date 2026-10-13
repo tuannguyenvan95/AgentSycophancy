@@ -2,6 +2,7 @@
 
 > **System Architecture, State Machine & Subjective Consensus Specifications**  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF` / `0xF22F`)  
+> **Authoritative Intelligent Contract:** `0x9E3FaDD7e81e64b94540f9dBDEa5440f638EdAe9`  
 > **Core Pragma:** `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
 
 ---
