@@ -166,3 +166,67 @@ def test_protocol_stats_and_aggregation(client):
     assert len(all_v) == 2
     assert all_v[0]["agent_model_id"] == "AGENT-1"
     assert all_v[1]["agent_model_id"] == "AGENT-2"
+
+
+def test_curator_rbac_and_quarantine_freeze(client):
+    """Verifies Curator Council RBAC, emergency quarantine freeze, and status restoration."""
+    contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
+    provider = client.accounts[1]
+    client_acc = client.accounts[2]
+    curator_candidate = client.accounts[3]
+
+    # Non-owner cannot add curator
+    with pytest.raises(Exception) as exc_info:
+        contract.connect(provider).add_curator(args=[str(curator_candidate)])
+    assert "Only contract owner" in str(exc_info.value)
+
+    # Owner adds curator
+    contract.connect(owner).add_curator(args=[str(curator_candidate)])
+    assert contract.is_curator(args=[str(curator_candidate)]).call() is True
+
+    # Provider creates vault
+    tx = contract.connect(provider).create_policy_vault(
+        args=[str(client_acc), "AGENT-MODEL-SEC-99", 6000],
+        value=1000000000000000000
+    )
+    vid = str(tx.return_value)
+
+    # Curator executes emergency quarantine
+    contract.connect(curator_candidate).emergency_quarantine_vault(
+        args=[vid, "Zero-day hallucination exploit vector detected"]
+    )
+
+    v_data = json.loads(contract.get_vault(args=[vid]).call())
+    assert v_data["status"] == 8  # STATUS_FROZEN_QUARANTINE
+
+    # Quarantined vault cannot receive claims
+    with pytest.raises(Exception):
+        contract.connect(client_acc).file_misalignment_claim(
+            args=[vid, "https://logs.ai/t.txt", "https://truth.ai/g.txt"]
+        )
+
+    # Curator lifts quarantine back to ACTIVE (status 0)
+    contract.connect(curator_candidate).lift_quarantine(
+        args=[vid, 0, "Security patch verified and model sandbox cleared"]
+    )
+    v_restored = json.loads(contract.get_vault(args=[vid]).call())
+    assert v_restored["status"] == 0  # STATUS_POLICY_ACTIVE
+
+
+def test_alignment_certificate_svg_generation(client):
+    """Verifies on-chain SVG SLA certificate export."""
+    contract = client.deploy("contracts/contract.py")
+    provider = client.accounts[0]
+    client_acc = client.accounts[1]
+
+    tx = contract.connect(provider).create_policy_vault(
+        args=[str(client_acc), "DEEPSEEK-R1-AUDIT", 6000],
+        value=1000000000000000000
+    )
+    vid = str(tx.return_value)
+
+    svg_content = contract.get_alignment_certificate_svg(args=[vid]).call()
+    assert "<svg" in svg_content
+    assert "DEEPSEEK-R1-AUDIT" in svg_content
+

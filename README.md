@@ -1,7 +1,7 @@
 # 🛡️ AgentSycophancy: Autonomous LLM Alignment & Anti-Hallucination Insurance Vault
 
 [![GenLayer Studionet](https://img.shields.io/badge/GenLayer-Studionet%20(Chain%2061999)-06B6D4?style=for-the-badge&logo=ethereum)](https://studio.genlayer.com)
-[![Pytest Test Suite](https://img.shields.io/badge/Tests-14%2F14%20PASS%20(100%25)-10B981?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Pytest Test Suite](https://img.shields.io/badge/Tests-17%2F17%20PASS%20(100%25)-10B981?style=for-the-badge&logo=pytest)](https://pytest.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
 > **Track:** AI Safety / Model Alignment / AI-to-AI Autonomous Insurance / Oracles  
@@ -9,7 +9,7 @@
 > **Authoritative Intelligent Contract:** `0x8bF0c434f9a0F507F54B333e6F86C208c0FfBE59`  
 > **Live Production dApp:** [https://agentsycophancy.vercel.app](https://agentsycophancy.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentSycophancy](https://github.com/tuannguyenvan95/AgentSycophancy)  
-> **Brand & Design Concept:** AI Safety & Alignment Radar Console (Obsidian `#0B0F19`, Elevated Slate `#151C2C`, Neural Cyan `#06B6D4`, Alignment Emerald `#10B981`, Warning Amber `#F59E0B`, Crimson `#EF4444`)
+> **Brand & Design Concept:** AI Safety & Alignment Radar Console (Obsidian `#070A12`, Elevated Dark `#131926`, Neural Cyan `#06B6D4`, Alignment Emerald `#10B981`, Warning Amber `#F59E0B`, Crimson `#EF4444`, Royal Purple `#A855F7`)
 
 ---
 
@@ -33,13 +33,16 @@ AgentSycophancy leverages GenLayer's **GenVM Intelligent Contracts**:
 - **On-Chain Misalignment Claim (`file_misalignment_claim`):** The client submits public links to the interaction dialogue and verified ground-truth reference documents (e.g. SEC 10-K filings, court records, CDC protocols).
 - **On-Chain AI Alignment Tribunal (`adjudicate_alignment_claim`):**
   - Scrapes raw dialogue and ground-truth references directly on-chain via `gl.nondet.web.render`.
-  - Analyzes sycophancy and factual consistency using GenLayer non-deterministic execution (`gl.nondet.exec_prompt`).
+  - Analyzes sycophancy, factual consistency, and harm index using GenLayer non-deterministic execution (`gl.nondet.exec_prompt`).
   - Reaches Byzantine Fault Tolerant (BFT) consensus across independent validator nodes (`gl.vm.run_nondet`).
 - **Automated Economic Enforcement:**
-  - **`CRITICAL_HALLUCINATION_SLASH`:** Severe fabrication &rarr; 100% escrow slashed and paid to Client.
-  - **`PARTIAL_SYCOPHANCY_PENALTY`:** Mild uncritical flattery &rarr; 40% paid to Client, 60% returned to Provider.
-  - **`OBJECTIVE_ALIGNMENT_CLEAN`:** Truthful resistance &rarr; Claim dismissed, 100% returned to Provider.
+  - **`CRITICAL_HALLUCINATION_SLASH`:** Severe fabrication $\rightarrow$ 100% escrow slashed and allocated to Client.
+  - **`PARTIAL_SYCOPHANCY_PENALTY`:** Mild uncritical flattery $\rightarrow$ 40% allocated to Client, 60% returned to Provider.
+  - **`OBJECTIVE_ALIGNMENT_CLEAN`:** Truthful resistance $\rightarrow$ Claim dismissed, 100% returned to Provider.
 - **Cooling-Off Challenge Window (24 blocks / ~72s):** Stakeholders can appeal with a 10% staked dispute bond to deter harassment.
+- **Curator Council Emergency Quarantine:** Multi-sig curators can freeze compromised policies during zero-day prompt exploit emergencies (`emergency_quarantine_vault`, `lift_quarantine`).
+- **Pull-Payment Disbursement Pattern:** Prevents reentrancy and recipient transfer reverts via safe pull-claims (`claim_payout`, `get_claimable_balance`).
+- **On-Chain Holographic SVG SLA Credential:** Pure vector SVG credentials rendered directly from GenVM memory (`get_alignment_certificate_svg`).
 
 ---
 
@@ -47,9 +50,9 @@ AgentSycophancy leverages GenLayer's **GenVM Intelligent Contracts**:
 
 The core contract is implemented in `contracts/contract.py` adhering strictly to GenLayer GenVM standards:
 - **Magic Pragma:** `# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }`
-- **GenVM Storage Types:** `TreeMap[str, PolicyVault]`, `DynArray[str]`, `bigint`, `u8`, `u32`, `u64`, `u256`, `Address`.
+- **GenVM Storage Types:** `TreeMap[str, PolicyVault]`, `TreeMap[str, bigint]`, `TreeMap[str, bool]`, `DynArray[str]`, `bigint`, `u8`, `u32`, `u64`, `u256`, `Address`.
 - **Security Canary Defense:** `CANARY_AGENT_SYCOPHANCY_V1` neutralizes prompt injection vectors.
-- **Checks-Effects-Interactions:** Escrow balances and bonds are zeroed out before native transfers (`_pay_native`).
+- **Checks-Effects-Interactions:** Escrow balances and bonds are zeroed out before disbursement.
 - **Authentic Execution Timestamp:** Computed strictly from runtime context (`gl.message_raw.get("datetime")`), immune to spam or block inflation attacks.
 - **Supreme Appellate Tribunal (`adjudicate_appeal`):** Evaluates permanently bound supplemental forensic audits.
 
@@ -60,8 +63,10 @@ stateDiagram-v2
     
     STATUS_POLICY_ACTIVE --> STATUS_CLAIM_FILED: file_misalignment_claim (Client submits URLs)
     STATUS_POLICY_ACTIVE --> STATUS_EXPIRED_RECLAIMED: cancel_or_reclaim (Expired without breach)
+    STATUS_POLICY_ACTIVE --> STATUS_FROZEN_QUARANTINE: emergency_quarantine_vault (Curator Freeze)
     
     STATUS_CLAIM_FILED --> STATUS_AWAITING_PAYOUT: adjudicate_alignment_claim (AI Jury Consensus)
+    STATUS_CLAIM_FILED --> STATUS_FROZEN_QUARANTINE: emergency_quarantine_vault (Curator Freeze)
     
     STATUS_AWAITING_PAYOUT --> STATUS_DISPUTED: appeal_verdict (10% Staked Bond within 72s)
     STATUS_AWAITING_PAYOUT --> STATUS_SETTLED_SLASHED: finalize_settlement (Hallucination -> 100% Client)
@@ -71,14 +76,14 @@ stateDiagram-v2
     STATUS_DISPUTED --> STATUS_SETTLED_SLASHED: adjudicate_appeal (Appeal Upheld Slash)
     STATUS_DISPUTED --> STATUS_SETTLED_PARTIAL: adjudicate_appeal (Appeal Upheld Partial)
     STATUS_DISPUTED --> STATUS_SETTLED_CLEAN: adjudicate_appeal (Appeal Upheld Clean)
-    STATUS_DISPUTED --> STATUS_SETTLED_SLASHED: adjudicate_appeal (Appeal Dismissed, Prior Slashed)
-    STATUS_DISPUTED --> STATUS_SETTLED_PARTIAL: adjudicate_appeal (Appeal Dismissed, Prior Partial)
-    STATUS_DISPUTED --> STATUS_SETTLED_CLEAN: adjudicate_appeal (Appeal Dismissed, Prior Clean)
+    
+    STATUS_FROZEN_QUARANTINE --> STATUS_POLICY_ACTIVE: lift_quarantine (Restored by Curator)
+    STATUS_FROZEN_QUARANTINE --> STATUS_CLAIM_FILED: lift_quarantine (Restored by Curator)
 ```
 
 ---
 
-## 🧪 3. Comprehensive Automated Test Suite
+## 🧪 3. Comprehensive Automated Test Suite (17/17 PASS)
 
 The test suite covers full lifecycle, adversarial safety, and spam defense scenarios:
 - `tests/test_agentsycophancy.py`:
@@ -89,6 +94,7 @@ The test suite covers full lifecycle, adversarial safety, and spam defense scena
   - `test_objective_alignment_clean_dismissal`: Proves dismissal and 100% refund when agent objectively pushed back against user self-diagnosis.
   - `test_appeal_upheld_slash`: Proves appellate overturn and 10% bond refund to appellant.
   - `test_cancel_or_reclaim_after_expiry`: Proves safe provider reclaim after policy coverage concludes.
+  - `test_harm_index_scoring_and_claimable_balance`: Verifies multi-vector harm index scoring and pull-payment claimable balances.
 - `tests/test_adversarial_safety.py`:
   - `test_zero_escrow_rejected`: Prohibits zero-deposit vaults.
   - `test_self_insurance_rejected`: Prevents providers from insuring their own address.
@@ -98,11 +104,13 @@ The test suite covers full lifecycle, adversarial safety, and spam defense scena
   - `test_appeal_after_cooling_off_window_reverts`: Enforces 72-second cooling-off deadline.
   - `test_reclaim_active_policy_reverts`: Prevents early escrow withdrawal while coverage is active.
   - `test_protocol_stats_and_aggregation`: Validates on-chain counters and view functions.
+  - `test_curator_rbac_and_quarantine_freeze`: Validates Curator Council RBAC, emergency freeze, and unfreeze.
+  - `test_alignment_certificate_svg_generation`: Validates pure vector on-chain SLA credential generation.
 
 ### Running the Tests:
 ```bash
 pytest tests/ -v
-# Output: 14 passed in 2.19s (100% PASS)
+# Output: 17 passed in 2.15s (100% PASS)
 ```
 
 ---
@@ -112,12 +120,11 @@ pytest tests/ -v
 Built with **React 18 + Vite + TypeScript + TailwindCSS + genlayer-js + lucide-react**:
 - **MetaMask Studionet Integration:** Automatic chain-switch helper (Chain ID: `61999` / `0xF22F`, RPC: `https://studio.genlayer.com/api`).
 - **Live On-Chain Balance Display:** Fetches real GEN balances directly via Studionet JSON-RPC.
-- **1-Click Interactive Benchmark Vectors:**
-  - *Vector 1 (Hallucination Slash):* $4.2B EBITDA fabrication vs SEC 10-K &rarr; 100% slash.
-  - *Vector 2 (Partial Sycophancy):* Overruled case law citation &rarr; 40% client / 60% provider.
-  - *Vector 3 (Objective Clean):* CDC dosage limit defense &rarr; Claim dismissed.
-- **Alignment Dossier Inspector:** Visualizes sycophancy gauge, factuality meter, confidence score, SHA-256 evidence fingerprint, and canary verification.
-- **Cooling-Off Dispute Portal:** Calculates required 10% bond and manages appellate hearings.
+- **Neural Alignment Risk Matrix (2D Cartesian Telemetry):** Plots all active AI agents across Sycophancy Index (Y-axis) vs Ground-Truth Factuality (X-axis) with quadrant alerts.
+- **On-Chain Holographic SLA Credential Viewer:** Renders and downloads pure vector SVGs created by GenVM smart contract.
+- **Curator Emergency Quarantine Console:** Instant on-chain freeze/unfreeze controls for Curator Council members.
+- **Pull-Payment Claim Portal:** Automatic pull-balance disbursement button in navbar.
+- **Production Benchmark Presets:** Fast 1-click loading of SEC, SCOTUS, and CDC enterprise specifications with real-time telemetry filters.
 
 ---
 
@@ -134,7 +141,7 @@ Built with **React 18 + Vite + TypeScript + TailwindCSS + genlayer-js + lucide-r
 ```bash
 cd frontend
 npm install
-npm run build # Verifies clean TypeScript compilation
+npm run build # Verifies clean TypeScript compilation (0 errors)
 npm run dev   # Launches local workstation at http://localhost:3000
 ```
 
@@ -145,12 +152,12 @@ npm run dev   # Launches local workstation at http://localhost:3000
 ```text
 AgentSycophancy/
 ├── contracts/
-│   └── contract.py                 # Intelligent Contract (GenVM)
+│   └── contract.py                 # Intelligent Contract (GenVM with Curator Council & Holographic SVG)
 ├── tests/
 │   ├── conftest.py                 # Test fixtures, mock sim client & gltest support
 │   ├── test_agentsycophancy.py      # Core lifecycle & spam immunity suite
-│   ├── test_lifecycle_and_verdicts.py # Partial sycophancy, clean & appeal flows
-│   └── test_adversarial_safety.py  # Zero-escrow, self-insurance & access control
+│   ├── test_lifecycle_and_verdicts.py # Partial sycophancy, clean, appeal & harm index flows
+│   └── test_adversarial_safety.py  # Zero-escrow, self-insurance, curator RBAC & SVG tests
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
@@ -160,19 +167,22 @@ AgentSycophancy/
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx
-│       ├── App.tsx
+│       ├── App.tsx                 # 100% on-chain reactive radar console
 │       ├── index.css
 │       ├── config/
-│       │   └── genlayer.ts         # Studionet client config & RPC helpers
+│       │   └── genlayer.ts         # Studionet client config, RPC helpers & contract ABI
 │       ├── components/
-│       │   ├── Navbar.tsx
-│       │   ├── StatsOverview.tsx
-│       │   ├── QuickDemoBar.tsx
-│       │   ├── PolicyCard.tsx
-│       │   ├── CreatePolicyModal.tsx
-│       │   ├── FileClaimModal.tsx
-│       │   ├── AlignmentInspectorModal.tsx
-│       │   └── AppealModal.tsx
+│       │   ├── Navbar.tsx          # Navigation, pull-claims & Curator badge
+│       │   ├── StatsOverview.tsx   # Protocol KPIs & telemetry
+│       │   ├── AlignmentRiskMatrix.tsx # 2D Cartesian multi-vector chart
+│       │   ├── QuickDemoBar.tsx    # Preset launcher & status filter
+│       │   ├── PolicyCard.tsx      # Policy vault card with gauges & actions
+│       │   ├── CreatePolicyModal.tsx # SLA escrow underwriter modal
+│       │   ├── FileClaimModal.tsx   # Misalignment claim submitter
+│       │   ├── AlignmentInspectorModal.tsx # AI Jury dossier inspector
+│       │   ├── AppealModal.tsx     # Appellate petition with 10% staked bond
+│       │   ├── HolographicCertificateModal.tsx # On-chain SVG SLA credential viewer
+│       │   └── QuarantineModal.tsx  # Curator Council emergency freeze/unfreeze
 │       └── utils/
 │           └── formatters.ts
 ├── ARCHITECTURE.md                 # System state machine & BFT consensus rubric
@@ -180,3 +190,4 @@ AgentSycophancy/
 ├── CHANGELOG.md                    # SemVer milestone history
 └── README.md                       # Master technical dossier
 ```
+

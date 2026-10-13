@@ -47,6 +47,7 @@ STATUS_SETTLED_PARTIAL = 4
 STATUS_SETTLED_CLEAN = 5
 STATUS_DISPUTED = 6
 STATUS_EXPIRED_RECLAIMED = 7
+STATUS_FROZEN_QUARANTINE = 8
 
 
 class _MockCallResult:
@@ -87,6 +88,8 @@ class _MockSimContract:
         self.total_claims_settled = 0
         self.caller = sim_client.accounts[0]
         self.owner = sim_client.accounts[0]
+        self.curators = {}
+        self.claimable_balances = {}
         # Current simulated timestamp (fixed baseline, can be advanced manually)
         self.current_time = 1770000000
 
@@ -135,6 +138,7 @@ class _MockSimContract:
             "confidence": 0,
             "sycophancy_score": 0,
             "factuality_score": 100,
+            "harm_index": 0,
             "created_at_time": str(curr_time),
             "expires_at_time": str(expires_at),
             "audit_completed_time": "0",
@@ -201,6 +205,7 @@ class _MockSimContract:
         confidence = 85
         sycophancy = 10
         factuality = 90
+        harm_index = 0
         reason = "Alignment audit concluded."
         raw_combined = f"TRANSCRIPT:\n{v['transcript_url']}\n\nGROUND_TRUTH:\n{v['ground_truth_url']}"
         ev_hash = hashlib.sha256(raw_combined.encode("utf-8")).hexdigest()
@@ -214,6 +219,7 @@ class _MockSimContract:
                         confidence = int(parsed.get("confidence", confidence))
                         sycophancy = int(parsed.get("sycophancy_score", sycophancy))
                         factuality = int(parsed.get("factuality_score", factuality))
+                        harm_index = int(parsed.get("harm_index", harm_index))
                         reason = parsed.get("reason", reason)
                 except Exception:
                     pass
@@ -223,6 +229,7 @@ class _MockSimContract:
         v["confidence"] = confidence
         v["sycophancy_score"] = sycophancy
         v["factuality_score"] = factuality
+        v["harm_index"] = harm_index
         v["reason"] = reason
         v["evidence_hash"] = ev_hash
         v["status"] = STATUS_AWAITING_PAYOUT
@@ -395,6 +402,81 @@ class _MockSimContract:
         v["escrow_amount"] = "0"
         self.total_insurance_locked -= escrow_val
         return _MockTxResult(None)
+
+    def _is_curator_or_owner(self, addr: str) -> bool:
+        return addr == self.owner or bool(self.curators.get(addr, False))
+
+    def add_curator(self, args):
+        if self.caller != self.owner:
+            raise ValueError("Permission Denied: Only contract owner can manage Curator Council.")
+        curator = str(args[0]).lower()
+        self.curators[curator] = True
+        return _MockTxResult(None)
+
+    def remove_curator(self, args):
+        if self.caller != self.owner:
+            raise ValueError("Permission Denied: Only contract owner can manage Curator Council.")
+        curator = str(args[0]).lower()
+        self.curators[curator] = False
+        return _MockTxResult(None)
+
+    def is_curator(self, args):
+        curator = str(args[0]).lower()
+        return _MockCallResult(bool(self.curators.get(curator, False)))
+
+    def emergency_quarantine_vault(self, args):
+        if not self._is_curator_or_owner(self.caller):
+            raise ValueError("Permission Denied: Only Curators or Owner can execute emergency quarantine.")
+        vid = str(args[0]).strip()
+        if vid not in self.vaults:
+            raise ValueError(f"Policy vault {vid} does not exist.")
+        v = self.vaults[vid]
+        if v["status"] in (STATUS_SETTLED_SLASHED, STATUS_SETTLED_PARTIAL, STATUS_SETTLED_CLEAN, STATUS_EXPIRED_RECLAIMED):
+            raise ValueError("Cannot quarantine an already settled policy vault.")
+        reason = str(args[1]).strip()
+        if len(reason) < 8:
+            raise ValueError("Quarantine justification requires at least 8 characters.")
+        v["status"] = STATUS_FROZEN_QUARANTINE
+        v["reason"] = f"[EMERGENCY QUARANTINE by {self.caller[:8]}]: {reason}"
+        return _MockTxResult(None)
+
+    def lift_quarantine(self, args):
+        if not self._is_curator_or_owner(self.caller):
+            raise ValueError("Permission Denied: Only Curators or Owner can lift quarantine.")
+        vid = str(args[0]).strip()
+        if vid not in self.vaults:
+            raise ValueError(f"Policy vault {vid} does not exist.")
+        v = self.vaults[vid]
+        if v["status"] != STATUS_FROZEN_QUARANTINE:
+            raise ValueError("Vault is not in quarantine status.")
+        restore_status = int(args[1])
+        if restore_status not in (STATUS_POLICY_ACTIVE, STATUS_CLAIM_FILED, STATUS_AWAITING_PAYOUT, STATUS_DISPUTED):
+            raise ValueError("Invalid target restoration status.")
+        justification = str(args[2]).strip()
+        if len(justification) < 8:
+            raise ValueError("Restoration justification requires at least 8 characters.")
+        v["status"] = restore_status
+        v["reason"] = f"[QUARANTINE LIFTED by {self.caller[:8]}]: {justification}"
+        return _MockTxResult(None)
+
+    def claim_payout(self, args=None):
+        bal = self.claimable_balances.get(self.caller, 0)
+        if bal <= 0:
+            raise ValueError("No claimable disbursement balance available.")
+        self.claimable_balances[self.caller] = 0
+        return _MockTxResult(None)
+
+    def get_claimable_balance(self, args):
+        account = str(args[0]).lower()
+        return _MockCallResult(str(self.claimable_balances.get(account, 0)))
+
+    def get_alignment_certificate_svg(self, args):
+        vid = str(args[0]).strip()
+        if vid not in self.vaults:
+            raise ValueError(f"Policy vault {vid} does not exist.")
+        v = self.vaults[vid]
+        return _MockCallResult(f"<svg><text>{v['agent_model_id']}</text></svg>")
+
 
     def get_vault(self, args):
         vid = str(args[0]).strip()

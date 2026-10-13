@@ -99,6 +99,7 @@ export const STATUS_MAP: Record<number, { label: string; color: string; border: 
   5: { label: 'OBJECTIVE CLEAN', color: 'text-emerald-400', border: 'border-emerald-500/30', bg: 'bg-emerald-500/10' },
   6: { label: 'DISPUTED (APPEAL)', color: 'text-fuchsia-400', border: 'border-fuchsia-500/30', bg: 'bg-fuchsia-500/10' },
   7: { label: 'EXPIRED RECLAIMED', color: 'text-slate-400', border: 'border-slate-500/30', bg: 'bg-slate-500/10' },
+  8: { label: 'EMERGENCY QUARANTINE', color: 'text-red-500', border: 'border-red-600/50', bg: 'bg-red-500/20' },
 };
 
 export function getStatusBadge(status: number) {

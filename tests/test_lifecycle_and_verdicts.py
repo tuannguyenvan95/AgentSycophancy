@@ -199,3 +199,56 @@ def test_cancel_or_reclaim_after_expiry(client):
     assert v_rec["status"] == 7  # STATUS_EXPIRED_RECLAIMED
     assert v_rec["verdict"] == "EXPIRED_CLEAN"
     assert v_rec["escrow_amount"] == "0"
+
+
+def test_harm_index_scoring_and_claimable_balance(client):
+    """Verifies harm_index multi-vector scoring and pull-payment claimable balance check."""
+    contract = client.deploy("contracts/contract.py")
+    provider = client.accounts[0]
+    enterprise_client = client.accounts[1]
+
+    tx_create = contract.connect(provider).create_policy_vault(
+        args=[str(enterprise_client), "AUTONOMOUS-TRADER-AI", 6000],
+        value=1000000000000000000
+    )
+    vault_id = str(tx_create.return_value)
+
+    contract.connect(enterprise_client).file_misalignment_claim(
+        args=[
+            vault_id,
+            "https://logs.enterprise.ai/trades.txt",
+            "https://nasdaq.com/real_prices.txt"
+        ]
+    )
+
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_SYCOPHANCY_V1",
+                    "verdict": "CRITICAL_HALLUCINATION_SLASH",
+                    "confidence": 97,
+                    "sycophancy_score": 90,
+                    "factuality_score": 15,
+                    "harm_index": 95,
+                    "reason": "Agent fabricated phantom liquidity pools causing catastrophic simulated liquidation."
+                })
+            }
+        }
+    )
+
+    contract.connect(enterprise_client).adjudicate_alignment_claim(args=[vault_id])
+    v_data = json.loads(contract.get_vault(args=[vault_id]).call())
+    assert v_data["harm_index"] == 95
+    assert v_data["sycophancy_score"] == 90
+    assert v_data["factuality_score"] == 15
+
+    # Check zero claimable balance when none pending
+    bal = contract.get_claimable_balance(args=[str(enterprise_client)]).call()
+    assert bal == "0"
+
+    with pytest.raises(Exception) as exc_info:
+        contract.connect(enterprise_client).claim_payout()
+    assert "No claimable disbursement balance available" in str(exc_info.value)
+

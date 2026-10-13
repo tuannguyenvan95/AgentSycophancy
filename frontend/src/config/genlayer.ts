@@ -72,6 +72,16 @@ export async function fetchStudionetBalance(address: string): Promise<string> {
   return '0.000';
 }
 
+export const STATUS_POLICY_ACTIVE = 0;
+export const STATUS_CLAIM_FILED = 1;
+export const STATUS_AWAITING_PAYOUT = 2;
+export const STATUS_SETTLED_SLASHED = 3;
+export const STATUS_SETTLED_PARTIAL = 4;
+export const STATUS_SETTLED_CLEAN = 5;
+export const STATUS_DISPUTED = 6;
+export const STATUS_EXPIRED_RECLAIMED = 7;
+export const STATUS_FROZEN_QUARANTINE = 8;
+
 export interface PolicyVaultData {
   vault_id: string;
   provider: string;
@@ -83,12 +93,13 @@ export interface PolicyVaultData {
   transcript_url: string;
   ground_truth_url: string;
   evidence_hash?: string;
-  status: number; // 0..7
+  status: number; // 0..8
   verdict: string;
   reason: string;
   confidence: number;
   sycophancy_score: number;
   factuality_score: number;
+  harm_index?: number;
   created_at_time?: string;
   expires_at_time?: string;
   audit_completed_time?: string;
@@ -99,6 +110,7 @@ export interface PolicyVaultData {
   expires_at_block?: string;
   audit_completed_block?: string;
 }
+
 
 export interface ProtocolStats {
   total_vaults: number;
@@ -287,3 +299,106 @@ export async function fetchVault(contractAddress: string, vaultId: string): Prom
     return null;
   }
 }
+
+/**
+ * Fetch user's claimable disbursement balance (Pull-Payment safe pattern)
+ */
+export async function fetchClaimableBalance(contractAddress: string, account: string): Promise<string> {
+  if (!contractAddress || !account) return '0';
+  try {
+    const client = getGenLayerClient();
+    const raw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_claimable_balance',
+      args: [account],
+    });
+    return String(raw || '0');
+  } catch (err) {
+    console.warn('fetchClaimableBalance error:', err);
+    return '0';
+  }
+}
+
+/**
+ * Check if account is an authorized Curator Council member
+ */
+export async function checkIsCurator(contractAddress: string, account: string): Promise<boolean> {
+  if (!contractAddress || !account) return false;
+  try {
+    const client = getGenLayerClient();
+    const raw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'is_curator',
+      args: [account],
+    });
+    return Boolean(raw);
+  } catch (err) {
+    console.warn('checkIsCurator error:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetch pure on-chain holographic SVG SLA verdict credential directly from GenVM memory
+ */
+export async function fetchAlignmentCertificateSvg(contractAddress: string, vaultId: string): Promise<string> {
+  if (!contractAddress || !vaultId) return '';
+  try {
+    const client = getGenLayerClient();
+    const raw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_alignment_certificate_svg',
+      args: [vaultId],
+    });
+    return String(raw || '');
+  } catch (err) {
+    console.warn('fetchAlignmentCertificateSvg error:', err);
+    return '';
+  }
+}
+
+/**
+ * Claim pending payout balance (Pull-Payment)
+ */
+export async function claimPayout(contractAddress: string, userAddress: string) {
+  const client = getGenLayerClient(userAddress);
+  return await client.writeContract({
+    address: contractAddress as `0x${string}`,
+    functionName: 'claim_payout',
+    args: [],
+    value: 0n,
+  });
+}
+
+/**
+ * Curator Council emergency quarantine freeze
+ */
+export async function emergencyQuarantineVault(contractAddress: string, userAddress: string, vaultId: string, reason: string) {
+  const client = getGenLayerClient(userAddress);
+  return await client.writeContract({
+    address: contractAddress as `0x${string}`,
+    functionName: 'emergency_quarantine_vault',
+    args: [vaultId, reason],
+    value: 0n,
+  });
+}
+
+/**
+ * Curator Council lift emergency quarantine
+ */
+export async function liftQuarantine(
+  contractAddress: string,
+  userAddress: string,
+  vaultId: string,
+  restoreStatus: number,
+  justification: string
+) {
+  const client = getGenLayerClient(userAddress);
+  return await client.writeContract({
+    address: contractAddress as `0x${string}`,
+    functionName: 'lift_quarantine',
+    args: [vaultId, restoreStatus, justification],
+    value: 0n,
+  });
+}
+

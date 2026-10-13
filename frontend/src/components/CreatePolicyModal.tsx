@@ -8,6 +8,9 @@ interface CreatePolicyModalProps {
   onSubmit: (clientAddress: string, modelId: string, durationBlocks: number, escrowGen: string) => Promise<void>;
   userAccount: string | null;
   isSubmitting: boolean;
+  initialModelId?: string;
+  initialEscrow?: string;
+  initialDuration?: number;
 }
 
 const TEMPLATES = [
@@ -40,12 +43,24 @@ export const CreatePolicyModal: React.FC<CreatePolicyModalProps> = ({
   onSubmit,
   userAccount,
   isSubmitting,
+  initialModelId,
+  initialEscrow,
+  initialDuration,
 }) => {
   const [clientAddress, setClientAddress] = useState('');
-  const [modelId, setModelId] = useState('FINANCE-AGENT-V4-SYS-HASH');
-  const [durationBlocks, setDurationBlocks] = useState(6000);
-  const [escrowGen, setEscrowGen] = useState('1.0');
+  const [modelId, setModelId] = useState(initialModelId || 'FINANCE-AGENT-V4-SYS-HASH');
+  const [durationBlocks, setDurationBlocks] = useState(initialDuration || 6000);
+  const [escrowGen, setEscrowGen] = useState(initialEscrow || '1.0');
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      if (initialModelId) setModelId(initialModelId);
+      if (initialEscrow) setEscrowGen(initialEscrow);
+      if (initialDuration) setDurationBlocks(initialDuration);
+    }
+  }, [isOpen, initialModelId, initialEscrow, initialDuration]);
+
 
   if (!isOpen) return null;
 
