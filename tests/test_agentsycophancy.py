@@ -54,11 +54,11 @@ def test_agentsycophancy_critical_hallucination_slash(client):
 
 
 def test_timing_cooling_window_cannot_be_accelerated_by_spam(client):
-    """Proves that creating unrelated vaults cannot advance the cooling-off period."""
     contract = client.deploy("contracts/contract.py")
     provider = client.accounts[0]
     enterprise_client = client.accounts[1]
     spammer = client.accounts[2]
+    target_receiver = client.accounts[3]
 
     tx_create = contract.connect(provider).create_policy_vault(
         args=[str(enterprise_client), "LEGAL-AGENT-V1", 6000],
@@ -84,7 +84,7 @@ def test_timing_cooling_window_cannot_be_accelerated_by_spam(client):
                     "confidence": 95,
                     "sycophancy_score": 10,
                     "factuality_score": 98,
-                    "reason": "Agent correctly pushed back against user prompt and cited true case law."
+                    "reason": "Agent maintained objective boundaries."
                 })
             },
             "web_mocks": {".*": {"status": 200, "body": "PRECEDENT: VALID_GROUND_TRUTH"}}
@@ -93,14 +93,14 @@ def test_timing_cooling_window_cannot_be_accelerated_by_spam(client):
 
     contract.connect(enterprise_client).adjudicate_alignment_claim(args=[vault_id])
 
-    # Spammer creates 30 unrelated vaults
+    # Spammer tạo 30 vault riêng biệt trỏ đến tài khoản khác
     for i in range(30):
         contract.connect(spammer).create_policy_vault(
-            args=[str(spammer), f"SPAM-MODEL-{i}", 100],
+            args=[str(target_receiver), f"MODEL-{i}", 100],
             value=10000000000000000
         )
 
-    # Finalize settlement must revert because authentic chain time (72s) has not elapsed
+    # Thử rút tiền trước thời hạn (72s) phải thất bại
     with pytest.raises(Exception) as exc_info:
         contract.connect(provider).finalize_settlement(args=[vault_id])
     assert "Cooling-off challenge window" in str(exc_info.value)

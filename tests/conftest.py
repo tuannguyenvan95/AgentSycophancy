@@ -109,7 +109,7 @@ class _MockSimContract:
         if len(agent_model_id) < 4:
             raise ValueError("Valid agent model identifier is required.")
 
-        if self.caller == client_address and not agent_model_id.startswith("SPAM-"):
+        if self.caller == client_address:
             raise ValueError("Provider cannot insure their own address.")
 
         dur_seconds = (duration_blocks * SECONDS_PER_BLOCK) if duration_blocks > 0 else DEFAULT_POLICY_DURATION_SECONDS
@@ -436,7 +436,8 @@ class _MockSimClient:
         self.accounts = [
             "0x1111111111111111111111111111111111111111",
             "0x2222222222222222222222222222222222222222",
-            "0x3333333333333333333333333333333333333333"
+            "0x3333333333333333333333333333333333333333",
+            "0x4444444444444444444444444444444444444444",
         ]
         self.provider = _MockProvider()
 

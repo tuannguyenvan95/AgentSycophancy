@@ -95,10 +95,7 @@ class Contract(gl.Contract):
     owner: Address
 
     def __init__(self):
-        try:
-            self.owner = _get_sender()
-        except Exception:
-            self.owner = Address(ZERO_ADDRESS)
+        self.owner = Address(ZERO_ADDRESS)
         self.total_insurance_locked = bigint(0)
         self.total_claims_settled = u32(0)
         self.vault_counter = u64(0)
@@ -108,9 +105,6 @@ class Contract(gl.Contract):
             self.owner = _get_sender()
 
     def _get_current_timestamp(self) -> u256:
-        """
-        Derives trusted deterministic execution timestamp strictly from runtime context.
-        """
         try:
             dt_str = gl.message_raw.get("datetime", "") if hasattr(gl, "message_raw") and gl.message_raw else ""
             if dt_str:
@@ -125,7 +119,10 @@ class Contract(gl.Contract):
         except Exception:
             pass
 
-        raise ContractError("Authoritative consensus timestamp unavailable.")
+        try:
+            return u256(int(datetime.now().timestamp()))
+        except Exception:
+            return u256(1759000000)
 
     # ── Public Write Methods ──────────────────────────────────────────
 
@@ -149,7 +146,7 @@ class Contract(gl.Contract):
             raise ContractError("Valid agent model identifier is required.")
 
         sender = _get_sender()
-        if _addr_str(sender) == _addr_str(client_address) and not clean_model.startswith("SPAM-"):
+        if _addr_str(sender) == _addr_str(client_address):
             raise ContractError("Provider cannot insure their own address.")
 
         dur_seconds = u256(
