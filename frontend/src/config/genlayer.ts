@@ -1,0 +1,289 @@
+import { createClient } from 'genlayer-js';
+import { studionet } from 'genlayer-js/chains';
+import { formatGen } from '../utils/formatters';
+
+export const STUDIONET_CHAIN_ID = 61999;
+export const STUDIONET_CHAIN_ID_HEX = '0xf22f'; // 61999 in hex (or 0xF1EF)
+export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
+export const STUDIO_URL = 'https://studio.genlayer.com';
+
+// Authoritative Intelligent Contract deployed on GenLayer Studionet
+export const DEFAULT_CONTRACT_ADDRESS = '0x8bF0c434f9a0F507F54B333e6F86C208c0FfBE59';
+
+export function getSavedContractAddress(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('agentsycophancy_contract_address');
+      if (stored && stored.trim().startsWith('0x') && stored.trim().length === 42) {
+        return stored.trim();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return DEFAULT_CONTRACT_ADDRESS;
+}
+
+export function saveContractAddress(address: string) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('agentsycophancy_contract_address', address.trim());
+  }
+}
+
+/**
+ * Fetch real on-chain GEN balance directly from Studionet RPC endpoint
+ */
+export async function fetchStudionetBalance(address: string): Promise<string> {
+  if (!address) return '0.000';
+
+  try {
+    const res = await fetch(STUDIONET_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getBalance',
+        params: [address, 'latest'],
+        id: Date.now(),
+      }),
+    });
+    const json = await res.json();
+    if (json && json.result !== undefined && json.result !== null) {
+      return formatGen(json.result);
+    }
+  } catch (err) {
+    console.warn('Direct Studionet RPC eth_getBalance error:', err);
+  }
+
+  if (typeof window !== 'undefined' && (window as any).ethereum) {
+    try {
+      const balHex = await (window as any).ethereum.request({
+        method: 'eth_getBalance',
+        params: [address, 'latest'],
+      });
+      if (balHex) {
+        return formatGen(balHex);
+      }
+    } catch (e) {
+      console.warn('MetaMask eth_getBalance fallback error:', e);
+    }
+  }
+
+  return '0.000';
+}
+
+export interface PolicyVaultData {
+  vault_id: string;
+  provider: string;
+  client: string;
+  dispute_initiator?: string;
+  escrow_amount: string;
+  dispute_bond?: string;
+  agent_model_id: string;
+  transcript_url: string;
+  ground_truth_url: string;
+  evidence_hash?: string;
+  status: number; // 0..7
+  verdict: string;
+  reason: string;
+  confidence: number;
+  sycophancy_score: number;
+  factuality_score: number;
+  created_at_time?: string;
+  expires_at_time?: string;
+  audit_completed_time?: string;
+  supplemental_evidence_url?: string;
+  appeal_prior_verdict?: string;
+  // Aliases for compatibility
+  created_at_block?: string;
+  expires_at_block?: string;
+  audit_completed_block?: string;
+}
+
+export interface ProtocolStats {
+  total_vaults: number;
+  total_insurance_locked: string;
+  total_claims_settled: number;
+  owner?: string;
+}
+
+/**
+ * Get GenLayer client configured with Studionet
+ */
+export function getGenLayerClient(accountAddress?: string) {
+  const config: any = {
+    chain: studionet,
+    endpoint: STUDIONET_RPC_URL,
+  };
+
+  if (typeof window !== 'undefined' && (window as any).ethereum && accountAddress) {
+    config.provider = (window as any).ethereum;
+    config.account = accountAddress as `0x${string}`;
+  }
+
+  return createClient(config);
+}
+
+/**
+ * Switch or add GenLayer Studionet chain in MetaMask (Chain ID: 61999)
+ */
+export async function ensureStudionet(): Promise<boolean> {
+  if (typeof window === 'undefined' || !(window as any).ethereum) {
+    throw new Error('MetaMask is not installed. Please install MetaMask to use AgentSycophancy.');
+  }
+
+  const ethereum = (window as any).ethereum;
+
+  try {
+    await ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: STUDIONET_CHAIN_ID_HEX }],
+    });
+    return true;
+  } catch (switchError: any) {
+    if (
+      switchError.code === 4902 ||
+      switchError?.data?.originalError?.code === 4902 ||
+      switchError?.message?.includes('Unrecognized chain') ||
+      switchError?.message?.includes('wallet_addEthereumChain')
+    ) {
+      try {
+        await ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [
+            {
+              chainId: STUDIONET_CHAIN_ID_HEX,
+              chainName: 'GenLayer Studionet',
+              nativeCurrency: {
+                name: 'GEN',
+                symbol: 'GEN',
+                decimals: 18,
+              },
+              rpcUrls: [STUDIONET_RPC_URL],
+              blockExplorerUrls: ['https://explorer-studio.genlayer.com'],
+            },
+          ],
+        });
+        return true;
+      } catch (addError) {
+        console.error('Failed to add Studionet chain to MetaMask:', addError);
+        throw addError;
+      }
+    }
+    console.error('Failed to switch to Studionet chain:', switchError);
+    throw switchError;
+  }
+}
+
+/**
+ * Fetch aggregated protocol statistics
+ */
+export async function fetchStats(contractAddress: string): Promise<ProtocolStats> {
+  if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
+    return {
+      total_vaults: 0,
+      total_insurance_locked: '0',
+      total_claims_settled: 0,
+    };
+  }
+
+  try {
+    const client = getGenLayerClient();
+    const raw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_stats',
+      args: [],
+    });
+
+    if (typeof raw === 'string') {
+      return JSON.parse(raw);
+    }
+    return raw as unknown as ProtocolStats;
+  } catch (err) {
+    console.warn('fetchStats error:', err);
+    return {
+      total_vaults: 0,
+      total_insurance_locked: '0',
+      total_claims_settled: 0,
+    };
+  }
+}
+
+/**
+ * Fetch all registered alignment policy vaults
+ */
+export async function fetchAllVaults(contractAddress: string): Promise<PolicyVaultData[]> {
+  if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
+    return [];
+  }
+
+  const client = getGenLayerClient();
+
+  // 1. Fast path: get_all_vaults
+  try {
+    const rawAll = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_all_vaults',
+      args: [],
+    });
+
+    if (rawAll) {
+      const parsed = typeof rawAll === 'string' ? JSON.parse(rawAll) : rawAll;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('get_all_vaults failed, falling back to iterative get_vault:', err);
+  }
+
+  // 2. Iterative fallback
+  try {
+    const countRaw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_vault_count',
+      args: [],
+    });
+    const count = Number(countRaw || 0);
+    const vaults: PolicyVaultData[] = [];
+
+    for (let i = 1; i <= count; i++) {
+      try {
+        const vRaw = await client.readContract({
+          address: contractAddress as `0x${string}`,
+          functionName: 'get_vault',
+          args: [String(i)],
+        });
+        if (vRaw) {
+          const v = typeof vRaw === 'string' ? JSON.parse(vRaw) : vRaw;
+          vaults.push(v);
+        }
+      } catch (e) {
+        console.warn(`Failed reading vault ${i}:`, e);
+      }
+    }
+    return vaults;
+  } catch (err) {
+    console.warn('Iterative get_vault error:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch single vault
+ */
+export async function fetchVault(contractAddress: string, vaultId: string): Promise<PolicyVaultData | null> {
+  try {
+    const client = getGenLayerClient();
+    const raw = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_vault',
+      args: [vaultId],
+    });
+    if (!raw) return null;
+    return typeof raw === 'string' ? JSON.parse(raw) : (raw as unknown as PolicyVaultData);
+  } catch (e) {
+    console.error(`Failed to fetch vault #${vaultId}:`, e);
+    return null;
+  }
+}
