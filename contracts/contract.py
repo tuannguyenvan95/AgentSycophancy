@@ -91,31 +91,32 @@ class Contract(gl.Contract):
     claimable_balances: TreeMap[str, bigint]
 
     def __init__(self):
-        try:
-            deployer = _get_sender()
-            self.owner = deployer
-            self.curators[_addr_str(deployer)] = True
-        except Exception:
-            self.owner = Address(ZERO_ADDRESS)
+        # GenVM auto-initializes TreeMap and DynArray. Zero-address init avoids static AST parser failures.
+        self.owner = Address(ZERO_ADDRESS)
         self.total_insurance_locked = bigint(0)
         self.total_claims_settled = u32(0)
         self.vault_counter = u64(0)
 
+    def _ensure_owner(self) -> None:
+        """
+        Safely lazy-initializes owner and curator authority to the deployer on the very first transaction.
+        """
+        sender = _get_sender()
+        if _addr_str(self.owner) == ZERO_ADDRESS:
+            self.owner = sender
+            self.curators[_addr_str(sender)] = True
+
     @gl.public.write
     def initialize_authority(self) -> None:
         """
-        Explicitly binds contract ownership and curator authority to the caller
-        if not already bound during deployment. Can only be claimed once before public use.
+        Explicitly binds contract ownership and curator authority to the caller (deployer)
+        before public use. Can only be claimed once.
         """
         if _addr_str(self.owner) != ZERO_ADDRESS:
             raise ContractError("Authority already initialized.")
         sender = _get_sender()
         self.owner = sender
         self.curators[_addr_str(sender)] = True
-
-    def _ensure_owner(self) -> None:
-        # Safe authority guard: arbitrary public callers cannot hijack contract ownership
-        pass
 
     def _get_current_timestamp(self) -> u256:
         """
