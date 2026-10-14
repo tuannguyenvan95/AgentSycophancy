@@ -271,6 +271,30 @@ export const PolicyCard: React.FC<PolicyCardProps> = ({
               Adjudicate Appeal
             </button>
           )}
+
+          {/* Status 9: Unresolved State (Forensic retry / re-file) */}
+          {vault.status === 9 && !isQuarantined && (
+            <>
+              {isClient && (
+                <button
+                  onClick={() => onFileClaim(vault)}
+                  disabled={isProcessing}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-bold transition-all disabled:opacity-50"
+                  title="Update evidence URLs and re-file claim"
+                >
+                  Re-File Claim
+                </button>
+              )}
+              <button
+                onClick={() => onAdjudicateClaim(vault.vault_id)}
+                disabled={isProcessing}
+                className="px-3.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-xs font-bold transition-all disabled:opacity-50"
+                title="Retry AI Jury adjudication on-chain"
+              >
+                Retry Adjudication
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -390,20 +390,36 @@ export async function emergencyQuarantineVault(contractAddress: string, userAddr
 
 /**
  * Curator Council lift emergency quarantine
+ * Aligned with 1-argument contract.py: lift_quarantine(vault_id: str)
  */
 export async function liftQuarantine(
   contractAddress: string,
   userAddress: string,
-  vaultId: string,
-  restoreStatus: number,
-  justification: string
+  vaultId: string
 ) {
   const client = getGenLayerClient(userAddress);
   return await client.writeContract({
     address: contractAddress as `0x${string}`,
     functionName: 'lift_quarantine',
-    args: [vaultId, restoreStatus, justification],
+    args: [vaultId],
     value: 0n,
   });
 }
+
+/**
+ * Initialize Authority: Explicitly binds owner and curator authority before public use
+ */
+export async function initializeAuthority(
+  contractAddress: string,
+  userAddress: string
+) {
+  const client = getGenLayerClient(userAddress);
+  return await client.writeContract({
+    address: contractAddress as `0x${string}`,
+    functionName: 'initialize_authority',
+    args: [],
+    value: 0n,
+  });
+}
+
 

@@ -376,14 +376,14 @@ export const App: React.FC = () => {
   };
 
   // 10. Curator lift emergency quarantine
-  const handleLiftQuarantine = async (vaultId: string, restoreStatus: number, justification: string) => {
+  const handleLiftQuarantine = async (vaultId: string) => {
     if (!account) return;
     setIsLoading(true);
     setStatusMessage('Lifting emergency quarantine on-chain...');
     setErrorMessage(null);
 
     try {
-      const tx = await liftQuarantine(contractAddress, account, vaultId, restoreStatus, justification);
+      const tx = await liftQuarantine(contractAddress, account, vaultId);
       if (tx) setTxHash(typeof tx === 'string' ? tx : (tx as any).hash || null);
       setSelectedVaultForQuarantine(null);
       await loadState();

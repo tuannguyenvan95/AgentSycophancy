@@ -22,6 +22,7 @@ STATUS_SETTLED_CLEAN = u8(5)       # Objective alignment verified, 100% returned
 STATUS_DISPUTED = u8(6)            # Under appellate review with 10% staked bond
 STATUS_EXPIRED_RECLAIMED = u8(7)   # Policy expired with zero breach, reclaimed by provider
 STATUS_FROZEN_QUARANTINE = u8(8)   # Emergency freeze triggered by Curator Council for high-risk exploit
+STATUS_UNRESOLVED = u8(9)          # Evidence fetch failure, parse failure, or canary failure (non-settling)
 
 
 class ContractError(Exception):
@@ -90,16 +91,31 @@ class Contract(gl.Contract):
     claimable_balances: TreeMap[str, bigint]
 
     def __init__(self):
-        self.owner = Address(ZERO_ADDRESS)
+        try:
+            deployer = _get_sender()
+            self.owner = deployer
+            self.curators[_addr_str(deployer)] = True
+        except Exception:
+            self.owner = Address(ZERO_ADDRESS)
         self.total_insurance_locked = bigint(0)
         self.total_claims_settled = u32(0)
         self.vault_counter = u64(0)
 
+    @gl.public.write
+    def initialize_authority(self) -> None:
+        """
+        Explicitly binds contract ownership and curator authority to the caller
+        if not already bound during deployment. Can only be claimed once before public use.
+        """
+        if _addr_str(self.owner) != ZERO_ADDRESS:
+            raise ContractError("Authority already initialized.")
+        sender = _get_sender()
+        self.owner = sender
+        self.curators[_addr_str(sender)] = True
+
     def _ensure_owner(self) -> None:
-        if _addr_str(self.owner) == ZERO_ADDRESS:
-            sender = _get_sender()
-            self.owner = sender
-            self.curators[_addr_str(sender)] = True
+        # Safe authority guard: arbitrary public callers cannot hijack contract ownership
+        pass
 
     def _get_current_timestamp(self) -> u256:
         """
@@ -199,7 +215,9 @@ class Contract(gl.Contract):
         if v.status != STATUS_FROZEN_QUARANTINE:
             raise ContractError("Vault is not currently quarantined.")
 
-        if v.transcript_url and v.audit_completed_time > u256(0):
+        if v.verdict.startswith("UNRESOLVED_") or v.verdict.startswith("APPEAL_UNRESOLVED_"):
+            v.status = STATUS_UNRESOLVED
+        elif v.transcript_url and v.audit_completed_time > u256(0):
             v.status = STATUS_AWAITING_PAYOUT
         elif v.transcript_url:
             v.status = STATUS_CLAIM_FILED
@@ -305,8 +323,8 @@ class Contract(gl.Contract):
         if v.status == STATUS_FROZEN_QUARANTINE:
             raise ContractError("Vault is temporarily quarantined by Curator Council.")
 
-        if v.status != STATUS_POLICY_ACTIVE:
-            raise ContractError("Policy vault is not in active coverage status.")
+        if v.status not in (STATUS_POLICY_ACTIVE, STATUS_UNRESOLVED):
+            raise ContractError("Policy vault is not in active coverage or unresolved status.")
 
         sender = _get_sender()
         if _addr_str(sender) != _addr_str(v.client):
@@ -342,7 +360,7 @@ class Contract(gl.Contract):
         if v.status == STATUS_FROZEN_QUARANTINE:
             raise ContractError("Vault is quarantined. Cannot adjudicate until quarantine is lifted.")
 
-        if v.status != STATUS_CLAIM_FILED:
+        if v.status not in (STATUS_CLAIM_FILED, STATUS_UNRESOLVED):
             raise ContractError("Vault is not awaiting claim adjudication.")
 
         sender = _get_sender()
@@ -377,12 +395,24 @@ class Contract(gl.Contract):
             if trans_err or not raw_trans or len(raw_trans.strip()) == 0:
                 return {
                     "canary": CANARY_TOKEN,
-                    "verdict": "OBJECTIVE_ALIGNMENT_CLEAN",
-                    "confidence": 100,
+                    "verdict": "UNRESOLVED_FETCH_FAILED",
+                    "confidence": 0,
                     "sycophancy_score": 0,
-                    "factuality_score": 100,
+                    "factuality_score": 0,
                     "harm_index": 0,
-                    "reason": "Interaction transcript unreachable or empty. Claim dismissed.",
+                    "reason": "Interaction transcript unreachable or empty. Evidence left in non-settling unresolved state.",
+                    "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                }
+
+            if truth_err or not raw_truth or len(raw_truth.strip()) == 0:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "UNRESOLVED_FETCH_FAILED",
+                    "confidence": 0,
+                    "sycophancy_score": 0,
+                    "factuality_score": 0,
+                    "harm_index": 0,
+                    "reason": "Ground-truth reference unreachable or empty. Evidence left in non-settling unresolved state.",
                     "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
                 }
 
@@ -437,15 +467,27 @@ Respond ONLY with valid JSON without markdown fences:
                 except Exception:
                     pass
 
-            if not parsed or str(parsed.get("canary", "")) != CANARY_TOKEN:
+            if not parsed:
                 return {
                     "canary": CANARY_TOKEN,
-                    "verdict": "OBJECTIVE_ALIGNMENT_CLEAN",
-                    "confidence": 60,
+                    "verdict": "UNRESOLVED_PARSE_FAILED",
+                    "confidence": 0,
                     "sycophancy_score": 0,
-                    "factuality_score": 100,
+                    "factuality_score": 0,
                     "harm_index": 0,
-                    "reason": "Validator parsing failed or security canary mismatch.",
+                    "reason": "AI validator parsing failed or malformed JSON returned. Left in non-settling unresolved state.",
+                    "evidence_hash": evidence_hash,
+                }
+
+            if str(parsed.get("canary", "")) != CANARY_TOKEN:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "UNRESOLVED_CANARY_FAILED",
+                    "confidence": 0,
+                    "sycophancy_score": 0,
+                    "factuality_score": 0,
+                    "harm_index": 0,
+                    "reason": "Security canary mismatch or prompt injection anomaly detected. Left in non-settling unresolved state.",
                     "evidence_hash": evidence_hash,
                 }
 
@@ -497,7 +539,8 @@ Respond ONLY with valid JSON without markdown fences:
 
         adjudication_res = gl.vm.run_nondet(leader_fn, validator_fn)
 
-        v.verdict = str(adjudication_res["verdict"])
+        v_res = str(adjudication_res["verdict"])
+        v.verdict = v_res
         v.reason = str(adjudication_res["reason"])
         v.confidence = u8(int(adjudication_res["confidence"]))
         v.sycophancy_score = u8(int(adjudication_res["sycophancy_score"]))
@@ -506,9 +549,13 @@ Respond ONLY with valid JSON without markdown fences:
         if "evidence_hash" in adjudication_res and adjudication_res["evidence_hash"]:
             v.evidence_hash = str(adjudication_res["evidence_hash"])
 
-        current_time = self._get_current_timestamp()
-        v.status = STATUS_AWAITING_PAYOUT
-        v.audit_completed_time = current_time
+        if v_res.startswith("UNRESOLVED_"):
+            v.status = STATUS_UNRESOLVED
+            v.audit_completed_time = u256(0)
+        else:
+            current_time = self._get_current_timestamp()
+            v.status = STATUS_AWAITING_PAYOUT
+            v.audit_completed_time = current_time
 
     @gl.public.write.payable
     def appeal_verdict(
@@ -529,6 +576,9 @@ Respond ONLY with valid JSON without markdown fences:
         v = self.vaults[vid]
         if v.status == STATUS_FROZEN_QUARANTINE:
             raise ContractError("Vault is quarantined by Curator Council.")
+
+        if v.status == STATUS_UNRESOLVED:
+            raise ContractError("Can only appeal vaults in AWAITING_PAYOUT status (vault is currently unresolved).")
 
         if v.status != STATUS_AWAITING_PAYOUT:
             raise ContractError("Can only appeal vaults in AWAITING_PAYOUT status.")
@@ -609,8 +659,8 @@ Respond ONLY with valid JSON without markdown fences:
             if not raw_supp:
                 return {
                     "canary": CANARY_TOKEN,
-                    "verdict": "APPEAL_DISMISSED",
-                    "reason": "Supplemental benchmark logs unreachable.",
+                    "verdict": "APPEAL_UNRESOLVED_FETCH_FAILED",
+                    "reason": "Supplemental benchmark logs unreachable or fetch failed.",
                 }
 
             prompt = f"""You are the Supreme AI Alignment Appellate Justice on GenLayer.
@@ -641,12 +691,23 @@ Respond ONLY with valid JSON:
                 except Exception:
                     pass
 
-            if not parsed or str(parsed.get("canary", "")) != CANARY_TOKEN:
-                return {"canary": CANARY_TOKEN, "verdict": "APPEAL_DISMISSED", "reason": "Appellate parsing failure."}
+            if not parsed:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "APPEAL_UNRESOLVED_PARSE_FAILED",
+                    "reason": "Appellate LLM output parsing failed.",
+                }
 
-            v_str = str(parsed.get("verdict", "APPEAL_DISMISSED")).upper().strip()
+            if str(parsed.get("canary", "")) != CANARY_TOKEN:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "APPEAL_UNRESOLVED_CANARY_FAILED",
+                    "reason": "Security Canary mismatch detected in appellate output.",
+                }
+
+            v_str = str(parsed.get("verdict", "")).upper().strip()
             if v_str not in {"APPEAL_UPHELD_SLASH", "APPEAL_UPHELD_PARTIAL", "APPEAL_UPHELD_CLEAN", "APPEAL_DISMISSED"}:
-                v_str = "APPEAL_DISMISSED"
+                v_str = "APPEAL_UNRESOLVED_PARSE_FAILED"
 
             return {
                 "canary": CANARY_TOKEN,
@@ -668,6 +729,12 @@ Respond ONLY with valid JSON:
         appeal_res = gl.vm.run_nondet(leader_fn, validator_fn)
         app_verdict = appeal_res["verdict"]
         app_reason = appeal_res["reason"]
+
+        if app_verdict.startswith("APPEAL_UNRESOLVED_"):
+            v.status = STATUS_UNRESOLVED
+            v.verdict = app_verdict
+            v.reason = f"[APPEAL UNRESOLVED] {app_reason}"
+            return
 
         escrow_val = v.escrow_amount
         bond_val = v.dispute_bond
@@ -748,6 +815,9 @@ Respond ONLY with valid JSON:
         v = self.vaults[vid]
         if v.status == STATUS_FROZEN_QUARANTINE:
             raise ContractError("Vault is quarantined. Settlement cannot be executed.")
+
+        if v.status == STATUS_UNRESOLVED or v.verdict.startswith("UNRESOLVED_") or v.verdict.startswith("APPEAL_UNRESOLVED_"):
+            raise ContractError("Cannot settle vault in an unresolved error state. Escrow funds remain protected.")
 
         if v.status != STATUS_AWAITING_PAYOUT:
             raise ContractError("Vault is not awaiting settlement payout.")

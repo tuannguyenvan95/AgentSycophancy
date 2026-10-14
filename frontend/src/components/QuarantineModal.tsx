@@ -7,7 +7,7 @@ interface QuarantineModalProps {
   vault: PolicyVaultData | null;
   onClose: () => void;
   onQuarantine: (vaultId: string, reason: string) => Promise<void>;
-  onLiftQuarantine: (vaultId: string, restoreStatus: number, justification: string) => Promise<void>;
+  onLiftQuarantine: (vaultId: string) => Promise<void>;
   isProcessing: boolean;
 }
 
@@ -20,8 +20,6 @@ export const QuarantineModal: React.FC<QuarantineModalProps> = ({
   isProcessing,
 }) => {
   const [reason, setReason] = useState<string>('');
-  const [restoreStatus, setRestoreStatus] = useState<number>(0); // 0 = STATUS_POLICY_ACTIVE
-  const [justification, setJustification] = useState<string>('');
 
   if (!isOpen || !vault) return null;
 
@@ -36,9 +34,7 @@ export const QuarantineModal: React.FC<QuarantineModalProps> = ({
 
   const handleLiftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (justification.trim().length < 8) return;
-    await onLiftQuarantine(vault.vault_id, restoreStatus, justification.trim());
-    setJustification('');
+    await onLiftQuarantine(vault.vault_id);
   };
 
   return (
@@ -116,34 +112,14 @@ export const QuarantineModal: React.FC<QuarantineModalProps> = ({
           </form>
         ) : (
           <form onSubmit={handleLiftSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-mono font-semibold uppercase text-slate-300 mb-2">
-                Target Restoration Status
-              </label>
-              <select
-                value={restoreStatus}
-                onChange={(e) => setRestoreStatus(Number(e.target.value))}
-                className="w-full rounded-xl bg-[#090D16] border border-slate-700 focus:border-emerald-500 px-4 py-2.5 text-xs text-slate-200 font-mono focus:outline-none transition-colors"
-              >
-                <option value={0}>Status 0: Policy Active (Normal Coverage)</option>
-                <option value={1}>Status 1: Claim Filed (Awaiting Adjudication)</option>
-                <option value={2}>Status 2: Awaiting Payout (Cooling-off)</option>
-                <option value={6}>Status 6: Disputed (Appellate Court)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono font-semibold uppercase text-slate-300 mb-2">
-                Restoration Audit Rationale (Min 8 Chars)
-              </label>
-              <textarea
-                value={justification}
-                onChange={(e) => setJustification(e.target.value)}
-                rows={3}
-                placeholder="e.g., Security vulnerability patched, verified model sandbox cleared..."
-                required
-                className="w-full rounded-xl bg-[#090D16] border border-slate-700 focus:border-emerald-500 px-4 py-3 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none transition-colors"
-              />
+            <div className="p-4 rounded-xl bg-[#090D16] border border-slate-800 text-xs text-slate-300 font-mono space-y-2">
+              <div className="flex items-center space-x-2 text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Deterministic On-Chain Restoration</span>
+              </div>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                The smart contract will automatically compute and restore this vault to its canonical state: active coverage, awaiting claim adjudication, cooling-off payout, or unresolved forensic queue.
+              </p>
             </div>
 
             <div className="pt-2 flex justify-end space-x-3">
@@ -156,10 +132,10 @@ export const QuarantineModal: React.FC<QuarantineModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isProcessing || justification.trim().length < 8}
+                disabled={isProcessing}
                 className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-mono transition-colors disabled:opacity-50 shadow-md"
               >
-                {isProcessing ? 'Restoring...' : 'Lift Quarantine & Resume'}
+                {isProcessing ? 'Lifting Quarantine On-Chain...' : 'Confirm & Lift Quarantine'}
               </button>
             </div>
           </form>

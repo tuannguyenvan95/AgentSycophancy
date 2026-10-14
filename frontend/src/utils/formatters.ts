@@ -100,6 +100,7 @@ export const STATUS_MAP: Record<number, { label: string; color: string; border: 
   6: { label: 'DISPUTED (APPEAL)', color: 'text-fuchsia-400', border: 'border-fuchsia-500/30', bg: 'bg-fuchsia-500/10' },
   7: { label: 'EXPIRED RECLAIMED', color: 'text-slate-400', border: 'border-slate-500/30', bg: 'bg-slate-500/10' },
   8: { label: 'EMERGENCY QUARANTINE', color: 'text-red-500', border: 'border-red-600/50', bg: 'bg-red-500/20' },
+  9: { label: 'UNRESOLVED (NON-SETTLING)', color: 'text-amber-400', border: 'border-amber-500/50', bg: 'bg-amber-500/20' },
 };
 
 export function getStatusBadge(status: number) {
@@ -148,6 +149,33 @@ export function getVerdictBadge(verdict: string) {
         bg: 'bg-purple-500/15',
         border: 'border-purple-500/40',
         badge: 'UPHELD',
+      };
+    case 'UNRESOLVED_FETCH_FAILED':
+    case 'APPEAL_UNRESOLVED_FETCH_FAILED':
+      return {
+        label: 'UNRESOLVED: EVIDENCE FETCH FAILED',
+        color: 'text-amber-400',
+        bg: 'bg-amber-500/20',
+        border: 'border-amber-500/50',
+        badge: 'FETCH FAIL',
+      };
+    case 'UNRESOLVED_PARSE_FAILED':
+    case 'APPEAL_UNRESOLVED_PARSE_FAILED':
+      return {
+        label: 'UNRESOLVED: LLM PARSE FAILED',
+        color: 'text-amber-300',
+        bg: 'bg-amber-500/20',
+        border: 'border-amber-500/50',
+        badge: 'PARSE FAIL',
+      };
+    case 'UNRESOLVED_CANARY_FAILED':
+    case 'APPEAL_UNRESOLVED_CANARY_FAILED':
+      return {
+        label: 'UNRESOLVED: CANARY MISMATCH / INJECTION DETECTED',
+        color: 'text-rose-400',
+        bg: 'bg-rose-500/20',
+        border: 'border-rose-500/50',
+        badge: 'CANARY FAIL',
       };
     default:
       return {

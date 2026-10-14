@@ -48,6 +48,7 @@ STATUS_SETTLED_CLEAN = 5
 STATUS_DISPUTED = 6
 STATUS_EXPIRED_RECLAIMED = 7
 STATUS_FROZEN_QUARANTINE = 8
+STATUS_UNRESOLVED = 9
 
 
 class _MockCallResult:
@@ -88,7 +89,7 @@ class _MockSimContract:
         self.total_claims_settled = 0
         self.caller = sim_client.accounts[0]
         self.owner = sim_client.accounts[0]
-        self.curators = {}
+        self.curators = {self.owner: True}
         self.claimable_balances = {}
         # Current simulated timestamp (fixed baseline, can be advanced manually)
         self.current_time = 1770000000
@@ -96,6 +97,13 @@ class _MockSimContract:
     def connect(self, account):
         self.caller = str(account).lower()
         return self
+
+    def initialize_authority(self, args=None):
+        if self.owner and self.owner != "0x0000000000000000000000000000000000000000":
+            raise ValueError("Authority already initialized.")
+        self.owner = self.caller
+        self.curators[self.caller] = True
+        return _MockTxResult(None)
 
     def _get_timestamp(self):
         return self.current_time
@@ -161,8 +169,8 @@ class _MockSimContract:
             raise ValueError(f"Policy vault {vid} does not exist.")
 
         v = self.vaults[vid]
-        if v["status"] != STATUS_POLICY_ACTIVE:
-            raise ValueError("Policy vault is not in active coverage status.")
+        if v["status"] not in (STATUS_POLICY_ACTIVE, STATUS_UNRESOLVED):
+            raise ValueError("Policy vault is not in active coverage or unresolved status.")
 
         if self.caller != v["client"]:
             raise ValueError("Role Violation: Only the covered client can file an alignment claim.")
@@ -190,40 +198,86 @@ class _MockSimContract:
             raise ValueError(f"Policy vault {vid} does not exist.")
 
         v = self.vaults[vid]
-        if v["status"] != STATUS_CLAIM_FILED:
+        if v["status"] not in (STATUS_CLAIM_FILED, STATUS_UNRESOLVED):
             raise ValueError("Vault is not awaiting claim adjudication.")
 
         if self.caller not in (v["client"], v["provider"], self.owner):
             raise ValueError("Permission Denied: Only client, provider, or owner can trigger adjudication.")
 
-        # Check mocks
+        # Check web rendering
         llm_mocks = self.client.provider.llm_mocks
         web_mocks = self.client.provider.web_mocks
 
-        # Default fallback
-        verdict = "OBJECTIVE_ALIGNMENT_CLEAN"
-        confidence = 85
-        sycophancy = 10
-        factuality = 90
-        harm_index = 0
-        reason = "Alignment audit concluded."
+        # Check if web mock specifically returns 404/failure or empty
+        fetch_failed = False
+        if web_mocks:
+            for url_pat, mock_res in web_mocks.items():
+                if isinstance(mock_res, dict):
+                    if mock_res.get("status", 200) != 200 or not mock_res.get("body"):
+                        fetch_failed = True
+                elif not mock_res:
+                    fetch_failed = True
+
         raw_combined = f"TRANSCRIPT:\n{v['transcript_url']}\n\nGROUND_TRUTH:\n{v['ground_truth_url']}"
         ev_hash = hashlib.sha256(raw_combined.encode("utf-8")).hexdigest()
 
-        if llm_mocks:
+        if fetch_failed:
+            verdict = "UNRESOLVED_FETCH_FAILED"
+            confidence = 0
+            sycophancy = 0
+            factuality = 0
+            harm_index = 0
+            reason = "Failed to fetch interaction transcript or verified ground truth reference."
+        elif llm_mocks:
             for pattern, mock_resp in llm_mocks.items():
-                try:
-                    parsed = json.loads(mock_resp) if isinstance(mock_resp, str) else mock_resp
-                    if parsed.get("canary") == CANARY_TOKEN:
-                        verdict = parsed.get("verdict", verdict)
-                        confidence = int(parsed.get("confidence", confidence))
-                        sycophancy = int(parsed.get("sycophancy_score", sycophancy))
-                        factuality = int(parsed.get("factuality_score", factuality))
-                        harm_index = int(parsed.get("harm_index", harm_index))
-                        reason = parsed.get("reason", reason)
-                except Exception:
-                    pass
+                parsed = None
+                if isinstance(mock_resp, dict):
+                    parsed = mock_resp
+                elif isinstance(mock_resp, str):
+                    cleaned = mock_resp.replace("```json", "").replace("```", "").strip()
+                    try:
+                        parsed = json.loads(cleaned)
+                    except Exception:
+                        pass
+
+                if not parsed:
+                    verdict = "UNRESOLVED_PARSE_FAILED"
+                    confidence = 0
+                    sycophancy = 0
+                    factuality = 0
+                    harm_index = 0
+                    reason = "Failed to parse alignment jury output JSON."
+                elif str(parsed.get("canary", "")) != CANARY_TOKEN:
+                    verdict = "UNRESOLVED_CANARY_FAILED"
+                    confidence = 0
+                    sycophancy = 0
+                    factuality = 0
+                    harm_index = 0
+                    reason = "Prompt injection or canary mismatch detected during alignment evaluation."
+                else:
+                    v_str = str(parsed.get("verdict", "OBJECTIVE_ALIGNMENT_CLEAN")).upper().strip()
+                    if v_str not in {"CRITICAL_HALLUCINATION_SLASH", "PARTIAL_SYCOPHANCY_PENALTY", "OBJECTIVE_ALIGNMENT_CLEAN"}:
+                        verdict = "UNRESOLVED_PARSE_FAILED"
+                        confidence = 0
+                        sycophancy = 0
+                        factuality = 0
+                        harm_index = 0
+                        reason = "Unrecognized jury verdict classification."
+                    else:
+                        verdict = v_str
+                        confidence = int(parsed.get("confidence", 85))
+                        sycophancy = int(parsed.get("sycophancy_score", 10))
+                        factuality = int(parsed.get("factuality_score", 90))
+                        harm_index = int(parsed.get("harm_index", 0))
+                        reason = str(parsed.get("reason", "Alignment audit concluded."))
                 break
+        else:
+            verdict = "OBJECTIVE_ALIGNMENT_CLEAN"
+            confidence = 85
+            sycophancy = 10
+            factuality = 90
+            harm_index = 0
+            reason = "Alignment audit concluded."
 
         v["verdict"] = verdict
         v["confidence"] = confidence
@@ -232,9 +286,15 @@ class _MockSimContract:
         v["harm_index"] = harm_index
         v["reason"] = reason
         v["evidence_hash"] = ev_hash
-        v["status"] = STATUS_AWAITING_PAYOUT
-        v["audit_completed_time"] = str(self._get_timestamp())
-        v["audit_completed_block"] = v["audit_completed_time"]
+
+        if verdict.startswith("UNRESOLVED_"):
+            v["status"] = STATUS_UNRESOLVED
+            v["audit_completed_time"] = "0"
+            v["audit_completed_block"] = "0"
+        else:
+            v["status"] = STATUS_AWAITING_PAYOUT
+            v["audit_completed_time"] = str(self._get_timestamp())
+            v["audit_completed_block"] = v["audit_completed_time"]
         return _MockTxResult(None)
 
     def appeal_verdict(self, args, value=0):
@@ -243,6 +303,9 @@ class _MockSimContract:
             raise ValueError(f"Policy vault {vid} does not exist.")
 
         v = self.vaults[vid]
+        if v["status"] == STATUS_UNRESOLVED:
+            raise ValueError("Can only appeal vaults in AWAITING_PAYOUT status (vault is currently unresolved).")
+
         if v["status"] != STATUS_AWAITING_PAYOUT:
             raise ValueError("Can only appeal vaults in AWAITING_PAYOUT status.")
 
@@ -295,20 +358,54 @@ class _MockSimContract:
         is_client_appellant = (appellant == v["client"])
         prior_verdict = v["appeal_prior_verdict"]
 
-        llm_mocks = self.client.provider.llm_mocks
-        app_verdict = "APPEAL_DISMISSED"
-        app_reason = "Appellate alignment review completed."
+        web_mocks = self.client.provider.web_mocks
+        fetch_failed = False
+        if web_mocks:
+            for url_pat, mock_res in web_mocks.items():
+                if isinstance(mock_res, dict) and (mock_res.get("status", 200) != 200 or not mock_res.get("body")):
+                    fetch_failed = True
+                elif not mock_res:
+                    fetch_failed = True
 
-        if llm_mocks:
+        llm_mocks = self.client.provider.llm_mocks
+        if fetch_failed:
+            app_verdict = "APPEAL_UNRESOLVED_FETCH_FAILED"
+            app_reason = "Supplemental benchmark logs unreachable or fetch failed."
+        elif llm_mocks:
             for pattern, mock_resp in llm_mocks.items():
-                try:
-                    parsed = json.loads(mock_resp) if isinstance(mock_resp, str) else mock_resp
-                    if parsed.get("canary") == CANARY_TOKEN:
-                        app_verdict = parsed.get("verdict", app_verdict)
-                        app_reason = parsed.get("reason", app_reason)
-                except Exception:
-                    pass
+                parsed = None
+                if isinstance(mock_resp, dict):
+                    parsed = mock_resp
+                elif isinstance(mock_resp, str):
+                    cleaned = mock_resp.replace("```json", "").replace("```", "").strip()
+                    try:
+                        parsed = json.loads(cleaned)
+                    except Exception:
+                        pass
+                if not parsed:
+                    app_verdict = "APPEAL_UNRESOLVED_PARSE_FAILED"
+                    app_reason = "Appellate LLM output parsing failed."
+                elif str(parsed.get("canary", "")) != CANARY_TOKEN:
+                    app_verdict = "APPEAL_UNRESOLVED_CANARY_FAILED"
+                    app_reason = "Security Canary mismatch detected in appellate output."
+                else:
+                    v_str = str(parsed.get("verdict", "APPEAL_DISMISSED")).upper().strip()
+                    if v_str not in {"APPEAL_UPHELD_SLASH", "APPEAL_UPHELD_PARTIAL", "APPEAL_UPHELD_CLEAN", "APPEAL_DISMISSED"}:
+                        app_verdict = "APPEAL_UNRESOLVED_PARSE_FAILED"
+                        app_reason = "Invalid appellate verdict."
+                    else:
+                        app_verdict = v_str
+                        app_reason = str(parsed.get("reason", "Appellate alignment review completed."))
                 break
+        else:
+            app_verdict = "APPEAL_DISMISSED"
+            app_reason = "Appellate alignment review completed."
+
+        if app_verdict.startswith("APPEAL_UNRESOLVED_"):
+            v["status"] = STATUS_UNRESOLVED
+            v["verdict"] = app_verdict
+            v["reason"] = f"[APPEAL UNRESOLVED] {app_reason}"
+            return _MockTxResult(None)
 
         escrow_val = int(v["escrow_amount"])
         bond_val = int(v["dispute_bond"])
@@ -354,6 +451,12 @@ class _MockSimContract:
             raise ValueError(f"Policy vault {vid} does not exist.")
 
         v = self.vaults[vid]
+        if v.get("status") == STATUS_FROZEN_QUARANTINE:
+            raise ValueError("Vault is quarantined. Settlement cannot be executed.")
+
+        if v.get("status") == STATUS_UNRESOLVED or v.get("verdict", "").startswith("UNRESOLVED_") or v.get("verdict", "").startswith("APPEAL_UNRESOLVED_"):
+            raise ValueError("Cannot settle vault in an unresolved error state. Escrow funds remain protected.")
+
         if v["status"] != STATUS_AWAITING_PAYOUT:
             raise ValueError("Vault is not awaiting settlement payout.")
 
@@ -449,14 +552,25 @@ class _MockSimContract:
         v = self.vaults[vid]
         if v["status"] != STATUS_FROZEN_QUARANTINE:
             raise ValueError("Vault is not in quarantine status.")
-        restore_status = int(args[1])
-        if restore_status not in (STATUS_POLICY_ACTIVE, STATUS_CLAIM_FILED, STATUS_AWAITING_PAYOUT, STATUS_DISPUTED):
-            raise ValueError("Invalid target restoration status.")
-        justification = str(args[2]).strip()
-        if len(justification) < 8:
-            raise ValueError("Restoration justification requires at least 8 characters.")
-        v["status"] = restore_status
-        v["reason"] = f"[QUARANTINE LIFTED by {self.caller[:8]}]: {justification}"
+
+        # Check if legacy 3 args were provided
+        if len(args) >= 3 and str(args[1]).isdigit():
+            restore_status = int(args[1])
+            if restore_status not in (STATUS_POLICY_ACTIVE, STATUS_CLAIM_FILED, STATUS_AWAITING_PAYOUT, STATUS_DISPUTED, STATUS_UNRESOLVED):
+                raise ValueError("Invalid target restoration status.")
+            v["status"] = restore_status
+            v["reason"] = f"[QUARANTINE LIFTED by {self.caller[:8]}]: {str(args[2]).strip()}"
+        else:
+            # Canonical 1-argument signature matching GenLayer contract
+            if v["verdict"].startswith("UNRESOLVED_") or v["verdict"].startswith("APPEAL_UNRESOLVED_"):
+                v["status"] = STATUS_UNRESOLVED
+            elif v.get("transcript_url") and int(v.get("audit_completed_time", 0)) > 0:
+                v["status"] = STATUS_AWAITING_PAYOUT
+            elif v.get("transcript_url"):
+                v["status"] = STATUS_CLAIM_FILED
+            else:
+                v["status"] = STATUS_POLICY_ACTIVE
+            v["reason"] = "Quarantine lifted by Curator Council. Alignment protocol resumed."
         return _MockTxResult(None)
 
     def claim_payout(self, args=None):
