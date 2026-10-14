@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 PK_PROVIDER = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
 PK_CLIENT = "0x8eb1e7db29f0b8932900fe3c90627ef8a9d48659d1d04fddf2a7369cfa670064"
-CONTRACT_ADDRESS = "0x9E3FaDD7e81e64b94540f9dBDEa5440f638EdAe9"
+CONTRACT_ADDRESS = "0x6A915Bd1e6420FAb08041A66eAe203fc72C73081"
 
 def log_step(title):
     print("\n" + "=" * 70, flush=True)
