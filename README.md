@@ -6,7 +6,7 @@
 
 > **Track:** AI Safety / Model Alignment / AI-to-AI Autonomous Insurance / Oracles  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF` with Hex `0xF22F`, RPC: `https://studio.genlayer.com/api`)  
-> **Authoritative Intelligent Contract:** `0x6A915Bd1e6420FAb08041A66eAe203fc72C73081`  
+> **Authoritative Intelligent Contract:** `0xb4B24646D94f132D23be15537661f847E07F3962`  
 > **Live Production dApp:** [https://agentsycophancy.vercel.app](https://agentsycophancy.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentSycophancy](https://github.com/tuannguyenvan95/AgentSycophancy)  
 > **Brand & Design Concept:** AI Safety & Alignment Radar Console (Obsidian `#070A12`, Elevated Dark `#131926`, Neural Cyan `#06B6D4`, Alignment Emerald `#10B981`, Warning Amber `#F59E0B`, Crimson `#EF4444`, Royal Purple `#A855F7`)
