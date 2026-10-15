@@ -423,4 +423,21 @@ export async function initializeAuthority(
   });
 }
 
+/**
+ * Transfer Protocol Ownership to a new address
+ */
+export async function transferOwnership(
+  contractAddress: string,
+  userAddress: string,
+  newOwnerAddress: string
+) {
+  const client = getGenLayerClient(userAddress);
+  return await client.writeContract({
+    address: contractAddress as `0x${string}`,
+    functionName: 'transfer_ownership',
+    args: [newOwnerAddress],
+    value: 0n,
+  });
+}
+
 

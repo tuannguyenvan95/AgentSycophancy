@@ -1,7 +1,7 @@
 # 🛡️ AgentSycophancy: Autonomous LLM Alignment & Anti-Hallucination Insurance Vault
 
 [![GenLayer Studionet](https://img.shields.io/badge/GenLayer-Studionet%20(Chain%2061999)-06B6D4?style=for-the-badge&logo=ethereum)](https://studio.genlayer.com)
-[![Pytest Test Suite](https://img.shields.io/badge/Tests-27%2F27%20PASS%20(100%25)-10B981?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Pytest Test Suite](https://img.shields.io/badge/Tests-30%2F30%20PASS%20(100%25)-10B981?style=for-the-badge&logo=pytest)](https://pytest.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
 > **Track:** AI Safety / Model Alignment / AI-to-AI Autonomous Insurance / Oracles  

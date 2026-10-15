@@ -91,32 +91,36 @@ class Contract(gl.Contract):
     claimable_balances: TreeMap[str, bigint]
 
     def __init__(self):
-        # GenVM auto-initializes TreeMap and DynArray. Zero-address init avoids static AST parser failures.
-        self.owner = Address(ZERO_ADDRESS)
+        # GenVM auto-initializes TreeMap and DynArray.
+        # Deterministically binds deployer as protocol owner and alignment curator upon contract creation.
+        try:
+            deployer = _get_sender()
+        except Exception:
+            deployer = Address(ZERO_ADDRESS)
+        self.owner = deployer
+        if _addr_str(deployer) != ZERO_ADDRESS:
+            self.curators[_addr_str(deployer)] = True
         self.total_insurance_locked = bigint(0)
         self.total_claims_settled = u32(0)
         self.vault_counter = u64(0)
 
-    def _ensure_owner(self) -> None:
-        """
-        Safely lazy-initializes owner and curator authority to the deployer on the very first transaction.
-        """
-        sender = _get_sender()
-        if _addr_str(self.owner) == ZERO_ADDRESS:
-            self.owner = sender
-            self.curators[_addr_str(sender)] = True
-
     @gl.public.write
     def initialize_authority(self) -> None:
         """
-        Explicitly binds contract ownership and curator authority to the caller (deployer)
-        before public use. Can only be claimed once.
+        Guards against re-initialization or hijacking. Authority is deterministically
+        established during contract creation.
         """
-        if _addr_str(self.owner) != ZERO_ADDRESS:
-            raise ContractError("Authority already initialized.")
-        sender = _get_sender()
-        self.owner = sender
-        self.curators[_addr_str(sender)] = True
+        raise ContractError("Authority already initialized at deployment.")
+
+    @gl.public.write
+    def transfer_ownership(self, new_owner: Address) -> None:
+        """Owner transfers protocol governance to a new address."""
+        if _addr_str(_get_sender()) != _addr_str(self.owner):
+            raise ContractError("Permission Denied: Only protocol owner can transfer ownership.")
+        if _addr_str(new_owner) == ZERO_ADDRESS:
+            raise ContractError("Invalid new owner address.")
+        self.owner = new_owner
+        self.curators[_addr_str(new_owner)] = True
 
     def _get_current_timestamp(self) -> u256:
         """
@@ -161,7 +165,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def add_curator(self, curator_address: Address) -> None:
         """Owner assigns domain expert to the AI Alignment Curator Council."""
-        self._ensure_owner()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise ContractError("Permission Denied: Only protocol owner can appoint curators.")
         self.curators[_addr_str(curator_address)] = True
@@ -169,7 +172,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def remove_curator(self, curator_address: Address) -> None:
         """Owner revokes curator privileges."""
-        self._ensure_owner()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise ContractError("Permission Denied: Only protocol owner can remove curators.")
         c_str = _addr_str(curator_address)
@@ -180,7 +182,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def emergency_quarantine_vault(self, vault_id: str, reason: str) -> None:
         """Curator Council or Owner freezes suspicious vault under malicious exploit or injection."""
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -203,7 +204,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def lift_quarantine(self, vault_id: str) -> None:
         """Curator Council lifts emergency freeze after forensic verification."""
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -230,7 +230,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def claim_payout(self) -> None:
         """Pull-payment safety withdrawal: Beneficiary claims safely buffered balances."""
-        self._ensure_owner()
         sender = _get_sender()
         s_str = _addr_str(sender)
         bal = self.claimable_balances.get(s_str, bigint(0))
@@ -252,7 +251,6 @@ class Contract(gl.Contract):
         """
         AI Provider locks GEN insurance escrow guaranteeing objective alignment for a client.
         """
-        self._ensure_owner()
         escrow = bigint(gl.message.value)
         if escrow <= bigint(0):
             raise ContractError("Alignment insurance escrow must be greater than 0 GEN.")
@@ -315,7 +313,6 @@ class Contract(gl.Contract):
         """
         Client files a claim submitting raw interaction logs and reference ground truth.
         """
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -352,7 +349,6 @@ class Contract(gl.Contract):
         """
         AI Alignment Tribunal evaluates sycophancy, factual divergence, harm index, and truthfulness.
         """
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -492,9 +488,30 @@ Respond ONLY with valid JSON without markdown fences:
                     "evidence_hash": evidence_hash,
                 }
 
-            v_raw = str(parsed.get("verdict", "OBJECTIVE_ALIGNMENT_CLEAN")).upper().strip()
+            if "verdict" not in parsed:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "UNRESOLVED_PARSE_FAILED",
+                    "confidence": 0,
+                    "sycophancy_score": 0,
+                    "factuality_score": 0,
+                    "harm_index": 0,
+                    "reason": "Missing verdict field in AI validator response. Left in non-settling unresolved state.",
+                    "evidence_hash": evidence_hash,
+                }
+
+            v_raw = str(parsed.get("verdict", "")).upper().strip()
             if v_raw not in {"CRITICAL_HALLUCINATION_SLASH", "PARTIAL_SYCOPHANCY_PENALTY", "OBJECTIVE_ALIGNMENT_CLEAN"}:
-                v_raw = "OBJECTIVE_ALIGNMENT_CLEAN"
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "UNRESOLVED_PARSE_FAILED",
+                    "confidence": 0,
+                    "sycophancy_score": 0,
+                    "factuality_score": 0,
+                    "harm_index": 0,
+                    "reason": f"Unsupported verdict '{v_raw}' returned by AI validator. Left in non-settling unresolved state.",
+                    "evidence_hash": evidence_hash,
+                }
 
             try:
                 syco = max(0, min(100, int(parsed.get("sycophancy_score", 0))))
@@ -569,7 +586,6 @@ Respond ONLY with valid JSON without markdown fences:
         Client or Provider can appeal within 24 blocks (~72s) with a 10% dispute bond.
         Binds supplemental benchmark/audit evidence permanently upon appeal.
         """
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -623,7 +639,6 @@ Respond ONLY with valid JSON without markdown fences:
         """
         Supreme Alignment Appellate Tribunal re-evaluates strictly against bound evidence.
         """
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -808,7 +823,6 @@ Respond ONLY with valid JSON:
         """
         Executes uncontested settlement strictly after 24 blocks (~72s) cooling-off window.
         """
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")
@@ -862,7 +876,6 @@ Respond ONLY with valid JSON:
     @gl.public.write
     def cancel_or_reclaim(self, vault_id: str) -> None:
         """Provider reclaims escrow once policy coverage duration concludes without breach."""
-        self._ensure_owner()
         vid = str(vault_id).strip()
         if vid not in self.vaults:
             raise ContractError(f"Policy vault {vid} does not exist.")

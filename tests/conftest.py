@@ -105,6 +105,16 @@ class _MockSimContract:
         self.curators[self.caller] = True
         return _MockTxResult(None)
 
+    def transfer_ownership(self, args):
+        if self.caller != self.owner:
+            raise ValueError("Permission Denied: Only protocol owner can transfer ownership.")
+        new_owner = str(args[0]).lower()
+        if new_owner == "0x0000000000000000000000000000000000000000":
+            raise ValueError("Invalid new owner address.")
+        self.owner = new_owner
+        self.curators[new_owner] = True
+        return _MockTxResult(None)
+
     def _get_timestamp(self):
         return self.current_time
 
@@ -254,15 +264,22 @@ class _MockSimContract:
                     factuality = 0
                     harm_index = 0
                     reason = "Prompt injection or canary mismatch detected during alignment evaluation."
+                elif "verdict" not in parsed:
+                    verdict = "UNRESOLVED_PARSE_FAILED"
+                    confidence = 0
+                    sycophancy = 0
+                    factuality = 0
+                    harm_index = 0
+                    reason = "Missing verdict field in AI validator response. Left in non-settling unresolved state."
                 else:
-                    v_str = str(parsed.get("verdict", "OBJECTIVE_ALIGNMENT_CLEAN")).upper().strip()
+                    v_str = str(parsed.get("verdict", "")).upper().strip()
                     if v_str not in {"CRITICAL_HALLUCINATION_SLASH", "PARTIAL_SYCOPHANCY_PENALTY", "OBJECTIVE_ALIGNMENT_CLEAN"}:
                         verdict = "UNRESOLVED_PARSE_FAILED"
                         confidence = 0
                         sycophancy = 0
                         factuality = 0
                         harm_index = 0
-                        reason = "Unrecognized jury verdict classification."
+                        reason = f"Unsupported verdict '{v_str}' returned by AI validator. Left in non-settling unresolved state."
                     else:
                         verdict = v_str
                         confidence = int(parsed.get("confidence", 85))
